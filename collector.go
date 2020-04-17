@@ -21,10 +21,23 @@ type zpSupportInfo struct {
 	} `xml:"File"`
 }
 type sonosdata struct {
-	ctl0 int
-	ctl1 int
-	ctl2 int
-	ani  int
+	ctl0     int
+	ctl1     int
+	ctl2     int
+	ani      int
+	roomname string
+}
+
+type device struct {
+	DeviceType      string `xml:"deviceType"`
+	RoomName        string `xml:"roomName"`
+	DisplayVersion  string `xml:"displayVersion"`
+	HardwareVersion string `xml:"hardwareVersion"`
+	ModelName       string `xml:"modelName"`
+	ModelNumber     string `xml:"modelNumber"`
+	SerialNum       string `xml:"serialNum"`
+	SoftwareVersion string `xml:"softwareVersion"`
+	UDN             string `xml:"UDN"`
 }
 
 //Define the metrics we wish to expose
@@ -33,6 +46,23 @@ var noiseMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_noise
 var aniMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_ani", Help: "AnI value for Sonos ctl"}, []string{"host"})
 var hosts = []string{"10.0.0.87", "10.0.0.11"}
 
+func fetchDevice(u string) (*device, error) {
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var root struct {
+		Device device `xml:"device"`
+	}
+	if err = xml.NewDecoder(resp.Body).Decode(&root); err != nil {
+		log.Printf("Decode %s: %s", u, err)
+	}
+
+	return &root.Device, err
+}
+
 func init() {
 	//Register metrics with prometheus
 	prometheus.MustRegister(noiseMetric)
@@ -40,10 +70,10 @@ func init() {
 	prometheus.MustRegister(jsbCollector{})
 	for _, host := range hosts {
 		test := getSonosData(host)
-		noiseMetric.WithLabelValues(host, "0").Set(float64(test.ctl0))
-		noiseMetric.WithLabelValues(host, "1").Set(float64(test.ctl1))
-		noiseMetric.WithLabelValues(host, "2").Set(float64(test.ctl2))
-		aniMetric.WithLabelValues(host).Set(float64(test.ani))
+		noiseMetric.WithLabelValues(test.roomname, "0").Set(float64(test.ctl0))
+		noiseMetric.WithLabelValues(test.roomname, "1").Set(float64(test.ctl1))
+		noiseMetric.WithLabelValues(test.roomname, "2").Set(float64(test.ctl2))
+		aniMetric.WithLabelValues(test.roomname).Set(float64(test.ani))
 	}
 }
 
@@ -60,15 +90,17 @@ func (c jsbCollector) Collect(ch chan<- prometheus.Metric) {
 	start := time.Now()
 	for _, host := range hosts {
 		test := getSonosData(host)
-		noiseMetric.WithLabelValues(host, "0").Set(float64(test.ctl0))
-		noiseMetric.WithLabelValues(host, "1").Set(float64(test.ctl1))
-		noiseMetric.WithLabelValues(host, "2").Set(float64(test.ctl2))
-		aniMetric.WithLabelValues(host).Set(float64(test.ani))
+		noiseMetric.WithLabelValues(test.roomname, "0").Set(float64(test.ctl0))
+		noiseMetric.WithLabelValues(test.roomname, "1").Set(float64(test.ctl1))
+		noiseMetric.WithLabelValues(test.roomname, "2").Set(float64(test.ctl2))
+		aniMetric.WithLabelValues(test.roomname).Set(float64(test.ani))
 	}
 	ch <- prometheus.MustNewConstMetric(collectionDuration, prometheus.GaugeValue, time.Since(start).Seconds())
 }
 
 func getSonosData(host string) sonosdata {
+	dataurl := "http://" + host + ":1400/xml/device_description.xml"
+	d, _ := fetchDevice(dataurl)
 	var sonos sonosdata
 	var ani = regexp.MustCompile(`OFDM ANI level: (?P<ani>\d+)`)
 	var noise = regexp.MustCompile(`Noise Floor: (?P<noise>-\d+) dBm \(chain (?P<ctl>\d+) ctl\)`)
@@ -117,5 +149,6 @@ func getSonosData(host string) sonosdata {
 			sonos.ctl2 = ino
 		}
 	}
+	sonos.roomname = d.RoomName
 	return sonos
 }
