@@ -68,7 +68,6 @@ func fetchDevice(u string) (*device, error) {
 }
 
 func init() {
-	log.Info("init")
 	sonss := getSonosUnits(hosts)
 	mycol := jsbCollector{sonosuniots: sonss}
 	//Register metrics with prometheus
@@ -77,11 +76,13 @@ func init() {
 	prometheus.MustRegister(mycol)
 
 	for _, host := range mycol.sonosuniots {
-		test := getSonosData(host.host)
-		noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
-		noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
-		noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
-		aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
+		test, werr := getSonosData(host.host)
+		if werr == nil {
+			noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
+			noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
+			noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
+			aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
+		}
 	}
 }
 
@@ -111,18 +112,19 @@ func (c jsbCollector) Collect(ch chan<- prometheus.Metric) {
 	start := time.Now()
 
 	for _, host := range c.sonosuniots {
-		test := getSonosData(host.host)
-		noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
-		noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
-		noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
+		test, werr := getSonosData(host.host)
+		if werr == nil {
+			noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
+			noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
+			noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
+		}
 		aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
+
 	}
 	ch <- prometheus.MustNewConstMetric(collectionDuration, prometheus.GaugeValue, time.Since(start).Seconds())
 }
 
-func getSonosData(host string) sonosdata {
-	//dataurl := "http://" + host + ":1400/xml/device_description.xml"
-	//d, _ := fetchDevice(dataurl)
+func getSonosData(host string) (sonosdata, error) {
 	var sonos sonosdata
 	var ani = regexp.MustCompile(`OFDM ANI level: (?P<ani>\d+)`)
 	var noise = regexp.MustCompile(`Noise Floor: (?P<noise>-\d+) dBm \(chain (?P<ctl>\d+) ctl\)`)
@@ -132,7 +134,8 @@ func getSonosData(host string) sonosdata {
 	}
 	response, err := client.Get("http://" + host + ":1400/status/proc/ath_rincon/status")
 	if err != nil {
-		log.Fatal(err)
+		log.Info(err)
+		return sonos, err
 	}
 	defer response.Body.Close()
 
@@ -143,7 +146,6 @@ func getSonosData(host string) sonosdata {
 	var aniMatches = ani.FindStringSubmatch(sonosInfo.File.Text)
 	for i, aniMatch := range aniMatches {
 		if ani.SubexpNames()[i] != "" {
-			//println(ani.SubexpNames()[i] + " = " + aniMatch)
 			iani, _ := strconv.Atoi(aniMatch)
 			sonos.ani = iani
 		}
@@ -171,6 +173,5 @@ func getSonosData(host string) sonosdata {
 			sonos.ctl2 = ino
 		}
 	}
-	//sonos.roomname = d.RoomName
-	return sonos
+	return sonos, nil
 }
