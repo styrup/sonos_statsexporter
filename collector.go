@@ -21,11 +21,10 @@ type zpSupportInfo struct {
 	} `xml:"File"`
 }
 type sonosdata struct {
-	ctl0     int
-	ctl1     int
-	ctl2     int
-	ani      int
-	roomname string
+	ctl0 int
+	ctl1 int
+	ctl2 int
+	ani  int
 }
 
 type device struct {
@@ -38,6 +37,11 @@ type device struct {
 	SerialNum       string `xml:"serialNum"`
 	SoftwareVersion string `xml:"softwareVersion"`
 	UDN             string `xml:"UDN"`
+}
+
+type sonosUnit struct {
+	host     string
+	roomname string
 }
 
 //Define the metrics we wish to expose
@@ -64,21 +68,38 @@ func fetchDevice(u string) (*device, error) {
 }
 
 func init() {
+	log.Info("init")
+	sonss := getSonosUnits(hosts)
+	mycol := jsbCollector{sonosuniots: sonss}
 	//Register metrics with prometheus
 	prometheus.MustRegister(noiseMetric)
 	prometheus.MustRegister(aniMetric)
-	prometheus.MustRegister(jsbCollector{})
-	for _, host := range hosts {
-		test := getSonosData(host)
-		noiseMetric.WithLabelValues(test.roomname, "0").Set(float64(test.ctl0))
-		noiseMetric.WithLabelValues(test.roomname, "1").Set(float64(test.ctl1))
-		noiseMetric.WithLabelValues(test.roomname, "2").Set(float64(test.ctl2))
-		aniMetric.WithLabelValues(test.roomname).Set(float64(test.ani))
+	prometheus.MustRegister(mycol)
+
+	for _, host := range mycol.sonosuniots {
+		test := getSonosData(host.host)
+		noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
+		noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
+		noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
+		aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
 	}
 }
 
+func getSonosUnits(sonoshosts []string) []sonosUnit {
+	var mysonosUnits = []sonosUnit{}
+
+	for _, host := range sonoshosts {
+		dataurl := "http://" + host + ":1400/xml/device_description.xml"
+		d, _ := fetchDevice(dataurl)
+		mysonosUnits = append(mysonosUnits, sonosUnit{host: host, roomname: d.RoomName})
+	}
+	return mysonosUnits
+}
+
 // Collect implements Prometheus.Collector.
-type jsbCollector struct{}
+type jsbCollector struct {
+	sonosuniots []sonosUnit
+}
 
 // Describe implements Prometheus.Collector.
 func (c jsbCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -88,19 +109,20 @@ func (c jsbCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect implements Prometheus.Collector.
 func (c jsbCollector) Collect(ch chan<- prometheus.Metric) {
 	start := time.Now()
-	for _, host := range hosts {
-		test := getSonosData(host)
-		noiseMetric.WithLabelValues(test.roomname, "0").Set(float64(test.ctl0))
-		noiseMetric.WithLabelValues(test.roomname, "1").Set(float64(test.ctl1))
-		noiseMetric.WithLabelValues(test.roomname, "2").Set(float64(test.ctl2))
-		aniMetric.WithLabelValues(test.roomname).Set(float64(test.ani))
+
+	for _, host := range c.sonosuniots {
+		test := getSonosData(host.host)
+		noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
+		noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
+		noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
+		aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
 	}
 	ch <- prometheus.MustNewConstMetric(collectionDuration, prometheus.GaugeValue, time.Since(start).Seconds())
 }
 
 func getSonosData(host string) sonosdata {
-	dataurl := "http://" + host + ":1400/xml/device_description.xml"
-	d, _ := fetchDevice(dataurl)
+	//dataurl := "http://" + host + ":1400/xml/device_description.xml"
+	//d, _ := fetchDevice(dataurl)
 	var sonos sonosdata
 	var ani = regexp.MustCompile(`OFDM ANI level: (?P<ani>\d+)`)
 	var noise = regexp.MustCompile(`Noise Floor: (?P<noise>-\d+) dBm \(chain (?P<ctl>\d+) ctl\)`)
@@ -149,6 +171,6 @@ func getSonosData(host string) sonosdata {
 			sonos.ctl2 = ino
 		}
 	}
-	sonos.roomname = d.RoomName
+	//sonos.roomname = d.RoomName
 	return sonos
 }
