@@ -46,6 +46,7 @@ type sonosUnit struct {
 
 //Define the metrics we wish to expose
 var collectionDuration = prometheus.NewDesc("sonos_collection_duration", "Total collection time", nil, nil)
+var collectionErrors = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_collection_errors", Help: "Errors in data collection"}, []string{"host"})
 var noiseMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_noise", Help: "Noise for Sonos ctl"}, []string{"host", "ctl"})
 var aniMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_ani", Help: "AnI value for Sonos ctl"}, []string{"host"})
 var hosts = []string{"10.0.0.87", "10.0.0.11"}
@@ -74,7 +75,7 @@ func init() {
 	prometheus.MustRegister(noiseMetric)
 	prometheus.MustRegister(aniMetric)
 	prometheus.MustRegister(mycol)
-
+	prometheus.MustRegister(collectionErrors)
 	for _, host := range mycol.sonosuniots {
 		test, werr := getSonosData(host.host)
 		if werr == nil {
@@ -82,7 +83,11 @@ func init() {
 			noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
 			noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
 			aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
+			collectionErrors.WithLabelValues(host.roomname).Set(0)
+		} else {
+			collectionErrors.WithLabelValues(host.roomname).Set(1)
 		}
+
 	}
 }
 
@@ -105,6 +110,7 @@ type jsbCollector struct {
 // Describe implements Prometheus.Collector.
 func (c jsbCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- collectionDuration
+
 }
 
 // Collect implements Prometheus.Collector.
@@ -117,14 +123,19 @@ func (c jsbCollector) Collect(ch chan<- prometheus.Metric) {
 			noiseMetric.WithLabelValues(host.roomname, "0").Set(float64(test.ctl0))
 			noiseMetric.WithLabelValues(host.roomname, "1").Set(float64(test.ctl1))
 			noiseMetric.WithLabelValues(host.roomname, "2").Set(float64(test.ctl2))
+			aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
+		} else {
+			collectionErrors.WithLabelValues(host.roomname).Inc()
 		}
-		aniMetric.WithLabelValues(host.roomname).Set(float64(test.ani))
 
 	}
 	ch <- prometheus.MustNewConstMetric(collectionDuration, prometheus.GaugeValue, time.Since(start).Seconds())
 }
 
 func getSonosData(host string) (sonosdata, error) {
+	if host == "10.0.0.87" {
+		host = "10.0.0.187"
+	}
 	var sonos sonosdata
 	var ani = regexp.MustCompile(`OFDM ANI level: (?P<ani>\d+)`)
 	var noise = regexp.MustCompile(`Noise Floor: (?P<noise>-\d+) dBm \(chain (?P<ctl>\d+) ctl\)`)
