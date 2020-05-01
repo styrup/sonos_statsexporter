@@ -133,9 +133,6 @@ func (c jsbCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func getSonosData(host string) (sonosdata, error) {
-	if host == "10.0.0.87" {
-		host = "10.0.0.187"
-	}
 	var sonos sonosdata
 	var ani = regexp.MustCompile(`OFDM ANI level: (?P<ani>\d+)`)
 	var noise = regexp.MustCompile(`Noise Floor: (?P<noise>-\d+) dBm \(chain (?P<ctl>\d+) ctl\)`)
