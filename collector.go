@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 )
 
 type zpSupportInfo struct {
@@ -49,7 +50,6 @@ var collectionDuration = prometheus.NewDesc("sonos_collection_duration", "Total 
 var collectionErrors = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_collection_errors", Help: "Errors in data collection"}, []string{"host"})
 var noiseMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_noise", Help: "Noise for Sonos ctl"}, []string{"host", "ctl"})
 var aniMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "sonos_ani", Help: "AnI value for Sonos ctl"}, []string{"host"})
-var hosts = []string{"10.0.0.87", "10.0.0.11"}
 
 func fetchDevice(u string) (*device, error) {
 	resp, err := http.Get(u)
@@ -68,8 +68,16 @@ func fetchDevice(u string) (*device, error) {
 	return &root.Device, err
 }
 
+func getSonosHostFromEnv() []string {
+	sonosHosts := getEnv("SONOSHOSTS", "")
+	if sonosHosts == "" {
+		log.Fatal("No list with Sonos hosts found, please add a environment variable named SONOSHOSTS with comma separated values for hosts.")
+	}
+	return strings.Split(sonosHosts, ",")
+}
+
 func init() {
-	sonss := getSonosUnits(hosts)
+	sonss := getSonosUnits(getSonosHostFromEnv())
 	mycol := jsbCollector{sonosuniots: sonss}
 	//Register metrics with prometheus
 	prometheus.MustRegister(noiseMetric)
